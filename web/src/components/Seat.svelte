@@ -29,7 +29,20 @@
     onNote = null,
     // Chips this seat just won, while the finished hand is still up.
     won = 0,
+    // Seats along the bottom of the felt put their chips above the plate,
+    // so what they have bet sits on the table rather than off the edge.
+    betAbove = false,
   } = $props();
+
+  // A check is shown where the chips would be, so the table reads at a
+  // glance: everyone either has an amount in front of them or the word
+  // CHECK, rather than nothing at all.
+  let checked = $derived(
+    seat != null &&
+      (seat.committed ?? 0) === 0 &&
+      seat.last_action === 'check' &&
+      !seat.folded,
+  );
 
   let player = $derived(seat?.player);
   let cards = $derived(seat?.cards ?? null);
@@ -142,10 +155,17 @@
         <div class="hand-name">{seat.hand_name}</div>
       {/if}
 
-      {#if seat.committed > 0}
-        <div class="bet numeric"><i class="chip"></i>{money(seat.committed)}</div>
-      {/if}
     </div>
+
+    {#if seat.committed > 0 || checked}
+      <div class="stake" class:above={betAbove}>
+        {#if seat.committed > 0}
+          <div class="bet numeric">{money(seat.committed)}</div>
+        {:else}
+          <div class="bet checked">CHECK</div>
+        {/if}
+      </div>
+    {/if}
 
     {#if won > 0}
       <div class="award numeric" aria-label="won {won}">+{money(won)}</div>
@@ -197,9 +217,9 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 8px;
-    min-width: 108px;
-    padding: 6px 14px;
+    gap: 10px;
+    min-width: 148px;
+    padding: 9px 18px;
     border-radius: var(--radius);
     /* Token-driven so the light theme follows without a second rule. */
     background: var(--plate);
@@ -230,8 +250,8 @@
   }
 
   .nick {
-    font-size: 13px;
-    max-width: 12ch;
+    font-size: 16px;
+    max-width: 13ch;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -239,7 +259,7 @@
 
   .stack {
     font-family: var(--numerals);
-    font-size: 17px;
+    font-size: 22px;
     font-variant-numeric: tabular-nums;
   }
 
@@ -396,6 +416,22 @@
     color: #ffe0e4;
   }
 
+  /* Chips in front of the seat, on the felt side of the plate. */
+  .stake {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  /* The seats along the bottom have their cards standing up above the
+     plate, so their chips go above those rather than behind them. */
+  .stake.above {
+    top: auto;
+    bottom: calc(100% + 34px);
+  }
+
   .below {
     position: absolute;
     top: 100%;
@@ -409,16 +445,35 @@
     pointer-events: none;
   }
 
+  /* What is in front of this seat: the amount bet, or the word CHECK.
+     A rounded rectangle rather than a pill, so a four-figure bet still
+     looks like chips pushed forward and not a stray label. */
   .bet {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 2px 9px;
-    border-radius: 999px;
-    background: rgba(10, 8, 14, 0.72);
+    justify-content: center;
+    min-width: 46px;
+    padding: 4px 12px;
+    border-radius: 9px;
+    background: rgba(10, 8, 14, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    color: var(--amber);
     font-family: var(--numerals);
-    font-size: 12px;
+    font-size: 15px;
+    font-weight: 650;
     white-space: nowrap;
+  }
+
+  /* A check is the same shape, filled white, so it reads as "they have
+     acted" from across the table without being mistaken for money. */
+  .bet.checked {
+    background: #f2eff7;
+    border-color: #f2eff7;
+    color: #1b1822;
+    font-family: var(--font);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
   }
 
   .chip {

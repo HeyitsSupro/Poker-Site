@@ -283,9 +283,11 @@
   });
 
   // A locked-in pre-action clears itself the moment the price changes, so
-  // nobody ever calls a raise they did not see.
+  // nobody ever calls a raise they did not see — and a plain CHECK stops
+  // being available at all once there is something to call.
   $effect(() => {
     if (preAction?.kind === 'call' && preAction.facing !== facing) preAction = null;
+    if (preAction?.kind === 'check' && facing > 0) preAction = null;
   });
 
   // When our turn arrives, play whatever was armed.
@@ -293,8 +295,16 @@
     if (!myTurn || !preAction) return;
     const armed = preAction;
     preAction = null;
+    const canCheckNow = legal.actions.includes('check');
     if (armed.kind === 'check_fold') {
-      act(legal.actions.includes('check') ? 'check' : 'fold');
+      act(canCheckNow ? 'check' : 'fold');
+    } else if (armed.kind === 'check') {
+      // Only ever checks. If the price moved it was cleared above, so
+      // reaching here without a check available means something changed
+      // in the same instant: do nothing rather than guess.
+      if (canCheckNow) act('check');
+    } else if (armed.kind === 'fold') {
+      act('fold');
     } else if (armed.kind === 'call' && armed.facing === (legal.to_call ?? 0)) {
       act('call');
     }
@@ -348,12 +358,29 @@
       event.preventDefault();
       if (!myTurn) setPreAction('check_fold');
     } else if (myTurn) {
+      // On your turn the keys act. Check and call are separate now, so
+      // K never silently calls a bet you had not registered.
       if (key === 'f') {
         event.preventDefault();
         act('fold');
-      } else if (key === 'k') {
+      } else if (key === 'k' && legal.actions.includes('check')) {
         event.preventDefault();
-        act(legal.actions.includes('check') ? 'check' : 'call');
+        act('check');
+      } else if (key === 'c' && legal.actions.includes('call')) {
+        event.preventDefault();
+        act('call');
+      }
+    } else {
+      // Off turn the same keys arm the matching pre-action.
+      if (key === 'f') {
+        event.preventDefault();
+        setPreAction('fold');
+      } else if (key === 'k' && facing === 0) {
+        event.preventDefault();
+        setPreAction('check');
+      } else if (key === 'c' && facing > 0) {
+        event.preventDefault();
+        setPreAction('call');
       }
     }
   }
@@ -467,6 +494,7 @@
               equity={view.equity?.[String(place.number)] ?? null}
               reaction={reactionBySeat[place.number] ?? null}
               won={winners[place.number] ?? 0}
+              betAbove={place.y > 70}
               note={myNotes[bySeat[place.number]?.player?.id] ?? ''}
               onNote={mySeat != null
                 ? (about, text) => conn.send('note', { about, text })
@@ -710,17 +738,75 @@
 {/if}
 
 <style>
+  /* On a wide screen the controls float over the page and the felt is
+     centred in the window, the way a real table is.
+     
+     They used to be grid columns, which coupled their width to the
+     table's: opening the chat or a CALL button appearing on your turn
+     resized the middle column and the whole table jumped. Overlays
+     cannot do that. The felt's size comes from the viewport alone, so it
+     is identical at every moment of a hand.
+     
+     The narrow layout further down goes back to a stacked grid. */
   .screen {
+    position: relative;
     min-height: 100dvh;
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    grid-template-rows: auto 1fr auto;
-    grid-template-areas:
-      'rail main info'
-      'rail main .'
-      'bl   main br';
-    gap: 12px;
     padding: 12px;
+  }
+
+  .rail,
+  .info,
+  .bottom-left,
+  .bottom-right {
+    position: fixed;
+    z-index: 5;
+    /* These float over the felt, and their boxes are larger than the
+       controls inside them. Without this the empty space around a button
+       would swallow clicks meant for a seat underneath. The controls
+       themselves take their clicks back on the next rule. */
+    pointer-events: none;
+  }
+
+  /* :global, because some of these children are other components and
+     carry their own scoping class rather than this file's. */
+  .rail > :global(*),
+  .info > :global(*),
+  .bottom-left > :global(*),
+  .bottom-right > :global(*) {
+    pointer-events: auto;
+  }
+
+  .rail {
+    /* Up at the top-left, clear of the felt. */
+    top: 14px;
+    left: 14px;
+  }
+
+  .info {
+    top: 14px;
+    right: 18px;
+  }
+
+  .bottom-left {
+    left: 14px;
+    bottom: 14px;
+    width: 390px;
+  }
+
+  .bottom-right {
+    right: 18px;
+    bottom: 14px;
+    width: 470px;
+  }
+
+  @media (max-width: 1200px) {
+    .bottom-left {
+      width: 320px;
+    }
+
+    .bottom-right {
+      width: 400px;
+    }
   }
 
   .rail {
@@ -764,10 +850,14 @@
     justify-content: center;
     gap: 14px;
     min-width: 0;
-    /* Room above and below for the plates that straddle the rim. Not at
-       the sides: padding there would narrow the felt, and a narrow felt is
-       exactly what pushes the bottom chairs into each other. */
-    padding: 44px 0;
+    min-height: 100dvh;
+    /* Room at the bottom for the floating chat and action area, so the
+       felt is centred in what is left rather than hidden behind them. */
+    padding-bottom: 150px;
+    /* Room above for the plates that straddle the rim. Not at the sides:
+       padding there would narrow the felt, and a narrow felt is exactly
+       what pushes the bottom chairs into each other. */
+    padding-top: 44px;
   }
 
   /* The felt is inset from its column by half a seat plate, so a chair on
@@ -775,9 +865,11 @@
      sideways. */
   .table-area {
     position: relative;
-    /* `main` already reserves the margin the plates overhang into, so the
-       felt itself can use the whole column. */
-    width: min(880px, 100%);
+    /* About 60% of the window wide, the proportion a real table has on
+       screen, but never wider than the column and never so tall that the
+       plates hanging off the top and bottom leave the viewport. The
+       height cap is expressed as a width because of the aspect ratio. */
+    width: min(62vw, 100%, (100dvh - 330px) * 16 / 9);
     aspect-ratio: 16 / 9;
     /* The board and the pot are sized against the felt, not the window, so
        five cards always fit on it at any width. */
@@ -803,9 +895,11 @@
     gap: 10px;
   }
 
+  /* Clear of the top seats' chips, which sit just under their plates on
+     the felt and would otherwise land on top of the pot. */
   .pot-row {
     position: absolute;
-    top: 13%;
+    top: 22%;
   }
 
   .pot {
@@ -871,11 +965,14 @@
     }
   }
 
+  /* A card still to come. Barely there on purpose: it only exists to
+     stop the board shifting sideways as it is dealt, and should never be
+     mistaken for a face-down card. */
   .slot {
-    width: clamp(26px, 11cqw, 84px);
+    width: clamp(30px, 11cqw, 94px);
     aspect-ratio: 5 / 7;
-    border-radius: 7px;
-    background: rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.07);
   }
 
   .pot {
@@ -893,13 +990,14 @@
   }
 
   .felt-name {
-    top: 63%;
+    top: 64%;
   }
 
-  /* High enough to clear the viewer's own plate, which straddles the
-     bottom rim and would otherwise cut the name in half. */
+  /* Both wordmarks sit together above the lower-centre of the felt. That
+     strip belongs to the viewer: their plate straddles the bottom rim and
+     their chips sit just above it, and decoration must not land there. */
   .felt-mark {
-    bottom: 19%;
+    top: 72%;
   }
 
   .seats {
@@ -964,6 +1062,10 @@
     flex-direction: column;
     gap: 8px;
     align-self: end;
+    /* Same reasoning as the grid columns: a fixed width means opening or
+       collapsing the chat cannot move the felt. */
+    width: var(--rail-w);
+    min-width: var(--rail-w);
   }
 
   .log-button {
@@ -1162,7 +1264,21 @@
 
   /* ---------------------------------------------------------- phones */
   @media (max-width: 860px) {
+    .rail,
+    .info,
+    .bottom-left,
+    .bottom-right {
+      position: static;
+      width: auto;
+    }
+
+    main {
+      min-height: 0;
+      padding-bottom: 0;
+    }
+
     .screen {
+      display: grid;
       grid-template-columns: 1fr;
       grid-template-rows: auto auto 1fr auto auto;
       grid-template-areas:

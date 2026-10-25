@@ -58,33 +58,38 @@
     color: #1d8a52;
   }
 
+  /* The rank is the thing you read across the table, so it is large and
+     sits in the top-left corner. The suit is bigger too, and pushed down
+     and left out of the rank's way rather than sitting under it. */
   .rank {
     position: absolute;
-    top: 4%;
-    left: 7%;
-    font-size: calc(var(--w) * 0.32);
+    top: 1%;
+    left: 8%;
+    font-size: calc(var(--w) * 0.46);
     font-weight: 700;
     line-height: 1;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.04em;
   }
 
   .suit {
-    font-size: calc(var(--w) * 0.52);
+    position: absolute;
+    left: 6%;
+    bottom: 2%;
+    font-size: calc(var(--w) * 0.66);
     line-height: 1;
-    margin-top: calc(var(--w) * 0.16);
   }
 
   /* Sizes: the board is the showpiece, hole cards sit on a seat plate. */
   .board {
-    --w: clamp(46px, 7.2vw, 86px);
+    --w: clamp(52px, 8vw, 96px);
   }
   /* Other players' cards are a hint that there is a hand there, not the
      focus: small enough to sit on the plate without crowding its neighbour. */
   .hole {
-    --w: clamp(26px, 3vw, 38px);
+    --w: clamp(30px, 3.4vw, 44px);
   }
   .mine {
-    --w: clamp(38px, 4.4vw, 56px);
+    --w: clamp(42px, 4.6vw, 60px);
   }
   .tiny {
     --w: 26px;

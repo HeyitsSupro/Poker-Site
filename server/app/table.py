@@ -1959,4 +1959,31 @@ def _seat_hand_view(
     }
     if mine and seat.hole and not seat.folded:
         view["hand_name"] = describe_any(seat.hole + hand.board)
+    view["last_action"] = _last_action_on_street(hand, seat_number)
     return view
+
+
+# The engine logs a board card at the start of each street, so everything
+# after the final one happened on the street being played now.
+_ACTION_KINDS = {"check", "call", "fold", "raise", "short_all_in", "blind",
+                 "ante", "straddle"}
+
+
+def _last_action_on_street(hand: holdem.Hand, seat_number: int) -> str | None:
+    """What this seat last did on the street in progress.
+
+    Used to show CHECK in front of a player the way a bet is shown. Only
+    the current street counts: a check on the flop means nothing once the
+    turn is out.
+    """
+    if hand.street in (holdem.COMPLETE, holdem.RUN_CHOICE):
+        return None
+    for entry in reversed(hand.log):
+        if entry.get("kind") == "board":
+            break
+        if entry.get("seat") != seat_number:
+            continue
+        kind = entry.get("kind")
+        if kind in _ACTION_KINDS:
+            return "raise" if kind == "short_all_in" else kind
+    return None

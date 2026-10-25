@@ -29,6 +29,9 @@
     onPreAction,
   } = $props();
 
+  // What it would cost to call right now, used by the pre-action row.
+  let facing = $derived(preAction?.facing ?? 0);
+
   let sizing = $state(false);
   let amount = $state(0);
   let input = $state(null);
@@ -38,8 +41,16 @@
   let canRaise = $derived(
     legal.actions?.includes('raise') || legal.actions?.includes('bet'),
   );
+  // Never "BET / RAISE": only the one that is actually possible. Off
+  // turn, a bet is possible when nobody has bet yet.
   let raiseWord = $derived(
-    !myTurn ? 'BET / RAISE' : legal.actions?.includes('bet') ? 'BET' : 'RAISE',
+    myTurn
+      ? legal.actions?.includes('bet')
+        ? 'BET'
+        : 'RAISE'
+      : facing > 0
+        ? 'RAISE'
+        : 'BET',
   );
   let low = $derived(legal.min_raise_to ?? 0);
   let high = $derived(legal.max_raise_to ?? 0);
@@ -118,26 +129,32 @@
       </div>
     </div>
   {:else}
-    {#if !myTurn}
-      <div class="pre">
-        <button
-          class="wide"
-          class:armed={preAction?.kind === 'check_fold'}
-          onclick={() => onPreAction('check_fold')}
-        >
-          CHECK OR FOLD<kbd>I</kbd>
-        </button>
-        {#if preAction?.facing > 0}
+    <!-- The pre-action row. It is always present, so arming something
+         never changes the height of this column and never nudges the
+         table. CALL only appears when there is a bet to call, and it sits
+         to the left of CHECK OR FOLD. -->
+    <div class="pre" class:hidden={myTurn}>
+      <div class="pre-slot">
+        {#if facing > 0}
           <button
-            class="wide"
+            class="pre-btn"
             class:armed={preAction?.kind === 'call'}
+            aria-pressed={preAction?.kind === 'call'}
             onclick={() => onPreAction('call')}
           >
-            CALL {money(preAction.facing)}
+            CALL {money(facing)}
           </button>
         {/if}
       </div>
-    {/if}
+      <button
+        class="pre-btn half"
+        class:armed={preAction?.kind === 'check_fold'}
+        aria-pressed={preAction?.kind === 'check_fold'}
+        onclick={() => onPreAction('check_fold')}
+      >
+        CHECK OR FOLD<kbd>I</kbd>
+      </button>
+    </div>
 
     <div class="row">
       <button
@@ -147,17 +164,35 @@
       >
         {raiseWord}<kbd>R</kbd>
       </button>
+
+      <!-- CHECK is its own button and can be armed in advance. Once
+           somebody bets there is nothing to check, so it is disabled and
+           any arming of it has already been cleared. -->
       <button
-        class="act call"
-        disabled={!myTurn || (!canCheck && !canCall) || busy}
-        onclick={() => onAct(canCheck ? 'check' : 'call')}
+        class="act check"
+        class:armed={!myTurn && preAction?.kind === 'check'}
+        aria-pressed={!myTurn && preAction?.kind === 'check'}
+        disabled={myTurn ? !canCheck || busy : facing > 0}
+        onclick={() => (myTurn ? onAct('check') : onPreAction('check'))}
       >
-        {#if !myTurn}CHECK / CALL{:else if canCheck}CHECK{:else}CALL {money(toCall)}{/if}<kbd>K</kbd>
+        CHECK<kbd>K</kbd>
       </button>
+
+      <!-- CALL takes the same slot on your turn, where the price is known. -->
+      <div class="call-slot">
+        {#if myTurn && canCall}
+          <button class="act call" disabled={busy} onclick={() => onAct('call')}>
+            CALL {money(toCall)}<kbd>C</kbd>
+          </button>
+        {/if}
+      </div>
+
       <button
         class="act fold"
-        disabled={!myTurn || busy}
-        onclick={() => onAct('fold')}
+        class:armed={!myTurn && preAction?.kind === 'fold'}
+        aria-pressed={!myTurn && preAction?.kind === 'fold'}
+        disabled={myTurn && busy}
+        onclick={() => (myTurn ? onAct('fold') : onPreAction('fold'))}
       >
         FOLD<kbd>F</kbd>
       </button>
@@ -166,20 +201,37 @@
 </div>
 
 <style>
+  /* A fixed width, and rows that are always the same height whatever is
+     showing. The action area shares a grid column with the felt, so if it
+     changed size when your turn came round, the table would jump. */
   .actions {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    width: min(440px, 100%);
+    width: 460px;
+    max-width: 100%;
     margin-left: auto;
   }
 
   .pre {
-    display: flex;
+    display: grid;
+    /* CALL on the left, CHECK OR FOLD at half width on the right. The
+       left slot is held open even when there is nothing to call. */
+    grid-template-columns: 1fr 1fr;
     gap: 8px;
+    height: 40px;
   }
 
-  .wide {
+  /* Hidden rather than removed, so the row below never moves up. */
+  .pre.hidden {
+    visibility: hidden;
+  }
+
+  .pre-slot {
+    display: flex;
+  }
+
+  .pre-btn {
     flex: 1;
     min-height: 40px;
     font-size: 12px;
@@ -189,25 +241,41 @@
     position: relative;
   }
 
-  .wide.armed {
+  .pre-btn.armed,
+  .act.armed {
     border-color: var(--accent);
     color: var(--accent);
-    background: rgba(180, 124, 255, 0.1);
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
   }
 
   .row {
-    display: flex;
+    display: grid;
+    /* Four fixed slots: bet/raise, check, call, fold. The call slot stays
+       empty off turn rather than collapsing, so the other three never
+       shuffle sideways underneath the pointer. */
+    grid-template-columns: 1.15fr 1fr 1fr 1fr;
     gap: 8px;
+    height: 58px;
+  }
+
+  .call-slot {
+    display: flex;
   }
 
   .act {
     flex: 1;
+    width: 100%;
     min-height: 58px;
     background: transparent;
     font-size: 14px;
     font-weight: 650;
     letter-spacing: 0.06em;
     position: relative;
+  }
+
+  .act.check {
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 55%, transparent);
   }
 
   .act.call {

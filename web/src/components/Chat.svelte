@@ -4,6 +4,17 @@
 
   let text = $state('');
   let field = $state(null);
+  let list = $state(null);
+
+  // Keep the newest message in view, but only when the reader is already
+  // at the bottom — scrolling back to re-read something should not be
+  // yanked away every time somebody types.
+  $effect(() => {
+    messages;
+    if (!list) return;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 60;
+    if (atBottom) queueMicrotask(() => list && (list.scrollTop = list.scrollHeight));
+  });
 
   export function focusField() {
     field?.focus();
@@ -40,8 +51,8 @@
   </button>
 
   {#if open}
-    <ul>
-      {#each messages.slice(-6) as message (message.id)}
+    <ul bind:this={list}>
+      {#each messages as message (message.id)}
         <li>
           <b style="color: {colourFor(message.nick)}">{message.nick}</b>
           <span>{message.text}</span>
@@ -67,7 +78,7 @@
     display: flex;
     flex-direction: column;
     gap: 6px;
-    width: min(380px, 100%);
+    width: 100%;
   }
 
   .toggle {
@@ -92,14 +103,24 @@
     transform: rotate(180deg);
   }
 
+  /* A fixed height with its own scroll: the whole history is here to
+     read, and the panel never changes size as messages arrive — which
+     would otherwise push the rest of the page about. */
   ul {
     margin: 0;
-    padding: 0;
+    padding: 6px 10px;
     list-style: none;
     display: flex;
     flex-direction: column;
-    gap: 3px;
-    font-size: 13px;
+    gap: 5px;
+    font-size: 14px;
+    height: 158px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: var(--radius);
+    background: color-mix(in srgb, var(--bg-raised) 72%, transparent);
+    border: 1px solid var(--plate-edge);
+    scrollbar-width: thin;
   }
 
   li {
