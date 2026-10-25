@@ -122,6 +122,19 @@
   );
 
   let myNotes = $derived(me?.notes ?? {});
+
+  // Who just won, and how much. The hand stays on screen through the gap
+  // before the next deal, so this is what marks the winner in that window
+  // — otherwise chips simply change and it is easy to miss what happened.
+  let winners = $derived.by(() => {
+    const result = view.last_hand?.result;
+    if (!result || view.hand?.complete === false) return {};
+    const out = {};
+    for (const [seat, amount] of Object.entries(result.awards ?? {})) {
+      if (amount > 0) out[Number(seat)] = amount;
+    }
+    return out;
+  });
   let onWaitlist = $derived((view.waitlist ?? []).some((w) => w.you));
   let tableFull = $derived(view.seats.length >= settings.seat_count);
 
@@ -198,24 +211,33 @@
    * seat table wants three along the bottom, two up each side and three
    * across the top.
    */
+  // Where each chair sits, as a percentage of the felt's box. Slot 0 is
+  // always the viewer, at the bottom, and the rest run clockwise.
+  //
+  // Two things shape these numbers. The plates straddle the rim rather
+  // than sitting inside it, so the extremes stay a few percent in from the
+  // edge — otherwise the left and right chairs hang over the rail and the
+  // action buttons. And the viewer's own plate is much wider than anyone
+  // else's, because it carries their two cards, so the chairs either side
+  // of the bottom are pushed well out towards the corners to clear it.
   const LAYOUTS = {
-    2: [[50, 102], [50, -4]],
-    3: [[50, 102], [6, 24], [94, 24]],
-    4: [[50, 102], [1, 50], [50, -4], [99, 50]],
-    5: [[50, 102], [4, 78], [16, 2], [84, 2], [96, 78]],
-    6: [[50, 102], [10, 90], [1, 42], [50, -4], [99, 42], [90, 90]],
-    7: [[50, 102], [13, 93], [0, 50], [22, 0], [78, 0], [100, 50], [87, 93]],
+    2: [[50, 102], [50, 1]],
+    3: [[50, 102], [8, 24], [92, 24]],
+    4: [[50, 102], [5, 50], [50, 1], [95, 50]],
+    5: [[50, 102], [6, 76], [18, 4], [82, 4], [94, 76]],
+    6: [[50, 102], [7, 86], [5, 40], [50, 1], [95, 40], [93, 86]],
+    7: [[50, 102], [8, 90], [4, 48], [24, 3], [76, 3], [96, 48], [92, 90]],
     8: [
-      [50, 102], [15, 94], [0, 56], [16, 2],
-      [50, -4], [84, 2], [100, 56], [85, 94],
+      [50, 102], [8, 92], [4, 54], [18, 4],
+      [50, 1], [82, 4], [96, 54], [92, 92],
     ],
     9: [
-      [50, 102], [17, 95], [0, 64], [3, 26], [34, -2],
-      [66, -2], [97, 26], [100, 64], [83, 95],
+      [50, 102], [9, 93], [4, 62], [7, 26], [34, 1],
+      [66, 1], [93, 26], [96, 62], [91, 93],
     ],
     10: [
-      [50, 102], [20, 96], [1, 70], [1, 36], [19, 0],
-      [50, -4], [81, 0], [99, 36], [99, 70], [80, 96],
+      [50, 102], [9, 94], [4, 68], [5, 34], [21, 3],
+      [50, 1], [79, 3], [95, 34], [96, 68], [91, 94],
     ],
   };
 
@@ -380,7 +402,7 @@
   <!-- the felt -->
   <main>
     <div class="table-area">
-      <div class="felt">
+      <div class="felt" class:quiet-labels={!!view.rabbit}>
         <div class="pot-row">
           <div class="pot numeric">{money(hand?.pot ?? 0)}</div>
         </div>
@@ -410,6 +432,17 @@
               </div>
             {/if}
           {/each}
+
+          {#if view.rabbit}
+            <!-- Without this the undealt cards read as an ordinary board,
+                 which is exactly the wrong impression: these are cards the
+                 hand never reached. -->
+            <p class="rabbit-note">
+              {view.rabbit.cards.some((c) => c === null)
+                ? 'Cards that never came — tap one to see it'
+                : 'Cards that never came'}
+            </p>
+          {/if}
         </div>
 
         <div class="felt-name">{structureLabel === 'PLH' ? 'Pot-Limit' : 'No-Limit'} Texas Hold'em</div>
@@ -433,6 +466,7 @@
               onBank={view.clock?.phase === 'bank'}
               equity={view.equity?.[String(place.number)] ?? null}
               reaction={reactionBySeat[place.number] ?? null}
+              won={winners[place.number] ?? 0}
               note={myNotes[bySeat[place.number]?.player?.id] ?? ''}
               onNote={mySeat != null
                 ? (about, text) => conn.send('note', { about, text })
@@ -730,6 +764,10 @@
     justify-content: center;
     gap: 14px;
     min-width: 0;
+    /* Room above and below for the plates that straddle the rim. Not at
+       the sides: padding there would narrow the felt, and a narrow felt is
+       exactly what pushes the bottom chairs into each other. */
+    padding: 44px 0;
   }
 
   /* The felt is inset from its column by half a seat plate, so a chair on
@@ -737,7 +775,9 @@
      sideways. */
   .table-area {
     position: relative;
-    width: min(820px, calc(100% - 130px));
+    /* `main` already reserves the margin the plates overhang into, so the
+       felt itself can use the whole column. */
+    width: min(880px, 100%);
     aspect-ratio: 16 / 9;
     /* The board and the pot are sized against the felt, not the window, so
        five cards always fit on it at any width. */
@@ -786,8 +826,49 @@
     gap: clamp(3px, 1cqw, 10px);
   }
 
+  /* The felt's own wordmarks are decoration; the rabbit note is not, and
+     they occupy the same band. The decoration gives way. */
+  .quiet-labels .felt-name,
+  .quiet-labels .felt-mark {
+    opacity: 0;
+  }
+
+  .rabbit-note {
+    margin: 2px 0 0;
+    text-align: center;
+    font-size: clamp(9px, 1.1cqw, 12px);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
   .board :global(.card) {
     --w: clamp(26px, 11cqw, 84px);
+    /* Each board card turns over as it lands. The flop arrives as three
+       new elements at once, so they are staggered below rather than
+       appearing as one block. Transform and opacity only, so it stays off
+       the main thread; `backwards` holds the start frame through the
+       delay instead of flashing the card first. */
+    animation: deal 300ms cubic-bezier(0.2, 0.7, 0.3, 1) backwards;
+  }
+
+  .board :global(.card:nth-child(2)) {
+    animation-delay: 70ms;
+  }
+
+  .board :global(.card:nth-child(3)) {
+    animation-delay: 140ms;
+  }
+
+  @keyframes deal {
+    from {
+      opacity: 0;
+      transform: translateY(-14px) scale(0.86) rotate(-4deg);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
 
   .slot {
@@ -812,11 +893,13 @@
   }
 
   .felt-name {
-    top: 70%;
+    top: 63%;
   }
 
+  /* High enough to clear the viewer's own plate, which straddles the
+     bottom rim and would otherwise cut the name in half. */
   .felt-mark {
-    bottom: 7%;
+    bottom: 19%;
   }
 
   .seats {
@@ -991,7 +1074,9 @@
   }
 
   .banner {
-    margin: 0;
+    /* Clears the viewer's own plate, which hangs below the felt and would
+       otherwise sit right under — or on top of — this. */
+    margin: 34px 0 0;
     padding: 6px 16px;
     border-radius: 999px;
     background: var(--bg-raised);

@@ -27,6 +27,8 @@
     // Your own note about this player, and the saver for it.
     note = '',
     onNote = null,
+    // Chips this seat just won, while the finished hand is still up.
+    won = 0,
   } = $props();
 
   let player = $derived(seat?.player);
@@ -58,7 +60,13 @@
   let urgent = $derived(countdown != null && countdown <= 5);
 </script>
 
-<div class="seat" class:empty={!seat} class:turn={isTurn} class:folded={seat?.folded}>
+<div
+  class="seat"
+  class:empty={!seat}
+  class:turn={isTurn}
+  class:folded={seat?.folded}
+  class:won={won > 0}
+>
   {#if seat}
     {#if player.hands_won > 0 || player.rebuys > 0}
       <div class="badges">
@@ -103,38 +111,48 @@
           <span class="label">{label}</span>
         {/if}
       </div>
+      {#if countdown != null}
+        <div
+          class="clock"
+          class:bank={onBank}
+          class:urgent
+          role="timer"
+          aria-label="{Math.ceil(countdown)} seconds to act"
+        >
+          <i style="width: {barPercent}%"></i>
+        </div>
+      {/if}
     </div>
 
-    {#if countdown != null}
-      <div
-        class="clock"
-        class:bank={onBank}
-        class:urgent
-        role="timer"
-        aria-label="{Math.ceil(countdown)} seconds to act"
-      >
-        <i style="width: {barPercent}%"></i>
-      </div>
-    {/if}
+    <!-- Everything that hangs below the plate lives in here, stacked in
+         one column and taken out of the flow. The seat's own box is then
+         exactly the plate, which is what the ring positions each chair
+         by: a player's plate must not shift just because it is their turn
+         and a clock appeared, or because they have chips in front. -->
+    <div class="below">
+      {#if equity}
+        <div class="equity numeric" title="chance of winning this hand">
+          {equity.win.toFixed(0)}%{#if equity.tie >= 0.5}<small>
+              &nbsp;tie {equity.tie.toFixed(0)}%</small
+            >{/if}
+        </div>
+      {/if}
 
-    {#if equity}
-      <div class="equity numeric" title="chance of winning this hand">
-        {equity.win.toFixed(0)}%{#if equity.tie >= 0.5}<small>
-            &nbsp;tie {equity.tie.toFixed(0)}%</small
-          >{/if}
-      </div>
+      {#if isMe && seat.hand_name}
+        <div class="hand-name">{seat.hand_name}</div>
+      {/if}
+
+      {#if seat.committed > 0}
+        <div class="bet numeric"><i class="chip"></i>{money(seat.committed)}</div>
+      {/if}
+    </div>
+
+    {#if won > 0}
+      <div class="award numeric" aria-label="won {won}">+{money(won)}</div>
     {/if}
 
     {#if reaction}
       <div class="reaction" aria-hidden="true">{reaction}</div>
-    {/if}
-
-    {#if isMe && seat.hand_name}
-      <div class="hand-name">{seat.hand_name}</div>
-    {/if}
-
-    {#if seat.committed > 0}
-      <div class="bet numeric"><i class="chip"></i>{money(seat.committed)}</div>
     {/if}
   {:else}
     <button class="sit" onclick={() => onSit(number)}>Sit</button>
@@ -239,9 +257,11 @@
   /* The countdown runs along the bottom edge of the plate, as in the
      reference screenshot. */
   .clock {
-    width: 100%;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
     height: 3px;
-    margin-top: -1px;
     border-radius: 0 0 var(--radius) var(--radius);
     background: rgba(255, 255, 255, 0.12);
     overflow: hidden;
@@ -278,6 +298,46 @@
     opacity: 0.7;
   }
 
+  /* The winning plate is picked out for the moment the hand stays on
+     screen, and the amount drifts up off it. */
+  .won .plate {
+    border-color: var(--green);
+    box-shadow: 0 0 0 1px var(--green), 0 0 22px -4px var(--green);
+  }
+
+  .award {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    color: var(--green);
+    font-family: var(--numerals);
+    font-size: 15px;
+    font-weight: 650;
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.8);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: award-up 2.4s ease-out forwards;
+  }
+
+  @keyframes award-up {
+    0% {
+      opacity: 0;
+      transform: translate(-50%, 10px);
+    }
+    15% {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    75% {
+      opacity: 1;
+      transform: translate(-50%, -10px);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-50%, -18px);
+    }
+  }
+
   .reaction {
     position: absolute;
     top: -10px;
@@ -311,10 +371,11 @@
   }
 
   .badges {
+    position: absolute;
+    bottom: calc(100% - 7px);
+    right: 2px;
     display: flex;
     gap: 4px;
-    align-self: flex-end;
-    margin-bottom: -6px;
     z-index: 2;
   }
 
@@ -335,9 +396,20 @@
     color: #ffe0e4;
   }
 
-  .bet {
+  .below {
     position: absolute;
-    top: calc(100% + 6px);
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    width: max-content;
+    pointer-events: none;
+  }
+
+  .bet {
     display: flex;
     align-items: center;
     gap: 5px;
