@@ -1,0 +1,24 @@
+# Optional. Render can read this instead of filling the form by hand
+# ("New > Blueprint"). The README walks through the manual route, which is
+# easier to follow the first time.
+#
+# DATABASE_URL is deliberately not here: sync: false means Render asks for it
+# and stores it as a secret, so the connection string never enters the repo.
+services:
+  - type: web
+    name: poker-server
+    runtime: python
+    plan: free
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      # The page's origin: scheme and host only. A browser never sends a
+      # path in the Origin header, so a value with one can never match.
+      - key: ALLOWED_ORIGIN
+        value: https://heyitssupro.github.io
+      - key: PYTHON_VERSION
+        value: 3.13.9

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Table icon">
+  <defs>
+    <radialGradient id="felt" cx="50%" cy="38%" r="68%">
+      <stop offset="0%" stop-color="#9b55c6"/>
+      <stop offset="100%" stop-color="#5e2a80"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="#141317"/>
+  <ellipse cx="256" cy="262" rx="176" ry="128" fill="url(#felt)"/>
+  <ellipse cx="256" cy="262" rx="176" ry="128" fill="none" stroke="#120f16" stroke-width="18"/>
+  <g transform="rotate(-12 196 256)">
+    <rect x="150" y="196" width="92" height="128" rx="12" fill="#f6f4f8"/>
+  </g>
+  <g transform="rotate(10 300 256)">
+    <rect x="266" y="196" width="92" height="128" rx="12" fill="#f6f4f8"/>
+  </g>
+</svg>

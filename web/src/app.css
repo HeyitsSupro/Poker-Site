@@ -1,0 +1,124 @@
+/* Design tokens. The look follows the reference screenshot — dark page, one
+   big purple felt — but every value here is ours. Phase 2 extends this file
+   rather than replacing it. */
+
+:root {
+  --bg: #141317;
+  --bg-raised: #1d1c22;
+  --plate: #26242c;
+  --plate-edge: #343140;
+  --text: #f3f1f6;
+  --text-dim: #9d98a9;
+  --accent: #b47cff;
+  --felt-top: #8d4ab6;
+  --felt-bottom: #5e2a80;
+  --felt-rim: #120f16;
+  --green: #4fd38a;
+  --red: #ff5f6b;
+  --amber: #ffc86b;
+
+  --radius: 14px;
+  --tap: 44px; /* minimum touch target */
+
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --numerals: 'SF Mono', 'Roboto Mono', ui-monospace, monospace;
+
+  color-scheme: dark;
+}
+
+/* The light theme, for a bright room. Dark is the default (section 8.5);
+   these override only the surfaces and text, so everything built on the
+   tokens follows without knowing a theme exists. */
+:root[data-theme='light'] {
+  --bg: #f3f1f6;
+  --bg-raised: #ffffff;
+  --plate: #ffffff;
+  --plate-edge: #d7d2e0;
+  --text: #1b1822;
+  --text-dim: #5f596e;
+  --accent: #7b3fd4;
+  --felt-rim: #cbc4d8;
+  --green: #1d8c56;
+  --red: #c9303d;
+  --amber: #a56800;
+
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+  /* The table is not a document: no pinch zoom, no double-tap zoom. */
+  touch-action: manipulation;
+  overscroll-behavior: none;
+}
+
+#app {
+  min-height: 100%;
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+    env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-height: var(--tap);
+  border-radius: var(--radius);
+  border: 1px solid var(--plate-edge);
+  background: var(--plate);
+  padding: 0 18px;
+  transition: background 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input {
+  font: inherit;
+  color: inherit;
+  min-height: var(--tap);
+  padding: 0 14px;
+  border-radius: var(--radius);
+  border: 1px solid var(--plate-edge);
+  background: var(--bg-raised);
+  width: 100%;
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Honour the system setting: no decorative motion for people who ask for
+   none (section 8.5). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

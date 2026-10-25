@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover so the table can reach into a phone's safe areas -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#141317" />
+    <meta name="description" content="A private play-money poker table for friends." />
+    <!-- Not indexed: a table link is the only thing gating entry. -->
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Table</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="icon-180.png" />
+    <!-- Runtime config: edit docs/config.js to point at the backend. -->
+    <script src="config.js"></script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

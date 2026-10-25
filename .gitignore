@@ -1,0 +1,21 @@
+# Secrets. The real values live in Render's environment variables.
+.env
+server/.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Node
+node_modules/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Note: docs/ is NOT ignored. It holds the built frontend and GitHub Pages
+# serves it straight from the repo.
