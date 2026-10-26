@@ -59,10 +59,107 @@
   let legal = $derived(me?.legal ?? { actions: [] });
   let myTurn = $derived((legal.actions?.length ?? 0) > 0);
   let seatCount = $derived(settings.seat_count);
+  // Hands that were turned face up have to stay face up through the pause
+  // after the hand, and a run-out is dealt on the client long after the
+  // server has settled everything — so for those seconds the live seats
+  // carry no cards at all. The finished hand still knows which hands were
+  // shown, and the server has already decided who may see them, so the
+  // cards are merged back onto the plate they belong to.
+  let shownCards = $derived.by(() => {
+    const rows = hand?.seats;
+    if (!Array.isArray(rows)) return {};
+    const shown = {};
+    for (const row of rows) if (row.cards) shown[row.seat] = row.cards;
+    return shown;
+  });
+
   let bySeat = $derived(
-    Object.fromEntries(view.seats.map((seat) => [seat.seat, seat])),
+    Object.fromEntries(
+      view.seats.map((seat) => {
+        const cards = seat.cards ?? shownCards[seat.seat] ?? null;
+        return [seat.seat, cards === seat.cards ? seat : { ...seat, cards }];
+      }),
+    ),
   );
-  let boards = $derived(hand?.boards?.length ? hand.boards : [hand?.board ?? []]);
+  let allBoards = $derived(hand?.boards?.length ? hand.boards : [hand?.board ?? []]);
+
+  // --- running it more than once ---------------------------------------
+  //
+  // The server settles every run at once, but dealing them all onto the
+  // screen in the same instant is unreadable — you cannot see which board
+  // did what. So the boards are laid out one under another and dealt in
+  // turn, a street at a time, with a beat between runs and the winner's
+  // chips paid before the next one starts. Nothing here changes the
+  // result; it only paces how it is shown.
+  const RUN_STREET_MS = 1000;
+  const RUN_GAP_MS = 2000;
+  const RUN_LEAD_MS = 600;
+
+  function commonPrefix(boards) {
+    if (!boards.length) return 0;
+    let i = 0;
+    outer: for (; i < boards[0].length; i += 1) {
+      for (const b of boards) if (b[i] !== boards[0][i]) break outer;
+    }
+    return i;
+  }
+
+  let runPlan = $derived.by(() => {
+    const boards = allBoards;
+    if (boards.length < 2) return null;
+    const shared = commonPrefix(boards);
+    // How the rest of the board would have come, street by street.
+    const streets = shared === 0 ? [3, 1, 1] : shared === 3 ? [1, 1] : [1];
+    const steps = [];
+    let at = RUN_LEAD_MS;
+    for (let run = 0; run < boards.length; run += 1) {
+      let upto = shared;
+      for (const size of streets) {
+        upto += size;
+        steps.push({ run, upto, at });
+        at += RUN_STREET_MS;
+      }
+      steps.push({ run, upto, at, settled: true });
+      at += RUN_GAP_MS;
+    }
+    return { shared, steps, runs: boards.length };
+  });
+
+  // Milliseconds since the finished hand appeared.
+  let runElapsed = $state(0);
+
+  $effect(() => {
+    const plan = runPlan;
+    if (!plan) return;
+    // Re-start whenever a different hand is on screen.
+    view.last_hand?.hand_no;
+    runElapsed = 0;
+    const started = Date.now();
+    const id = setInterval(() => {
+      runElapsed = Date.now() - started;
+    }, 100);
+    return () => clearInterval(id);
+  });
+
+  /** How much of each board is face up at this moment. */
+  let boards = $derived.by(() => {
+    const plan = runPlan;
+    if (!plan) return allBoards;
+    return allBoards.map((board, run) => {
+      let upto = plan.shared;
+      for (const step of plan.steps) {
+        if (step.run === run && step.at <= runElapsed) upto = Math.max(upto, step.upto);
+      }
+      return board.slice(0, upto);
+    });
+  });
+
+  /** Runs whose chips have been paid so far. */
+  let runsSettled = $derived.by(() => {
+    const plan = runPlan;
+    if (!plan) return 0;
+    return plan.steps.filter((s) => s.settled && s.at <= runElapsed).length;
+  });
 
   // --- countdowns -------------------------------------------------------
   //
@@ -130,8 +227,28 @@
     const result = view.last_hand?.result;
     if (!result || view.hand?.complete === false) return {};
     const out = {};
+    const runs = result.runs ?? [];
+
+    if (runPlan) {
+      // Run by run: a board pays its winner before the next one is dealt,
+      // so the chips arrive when you watch them being won.
+      for (let i = 0; i < Math.min(runsSettled, runs.length); i += 1) {
+        for (const pot of runs[i].pots ?? []) {
+          for (const [seat, amount] of Object.entries(pot.payout ?? {})) {
+            out[Number(seat)] = (out[Number(seat)] ?? 0) + amount;
+          }
+        }
+      }
+      return out;
+    }
+
+    const refunds = result.refunds ?? {};
     for (const [seat, amount] of Object.entries(result.awards ?? {})) {
-      if (amount > 0) out[Number(seat)] = amount;
+      // An uncalled bet comes straight back to whoever made it. That is
+      // their own money returned, not winnings: raising 20 into a fold
+      // wins nothing, so it must not be counted here.
+      const won = amount - (refunds[seat] ?? 0);
+      if (won > 0) out[Number(seat)] = won;
     }
     return out;
   });
@@ -211,35 +328,63 @@
    * seat table wants three along the bottom, two up each side and three
    * across the top.
    */
-  // Where each chair sits, as a percentage of the felt's box. Slot 0 is
-  // always the viewer, at the bottom, and the rest run clockwise.
+  // Where each chair sits, as a percentage of the felt's box, in
+  // clockwise order starting with the viewer at the bottom.
   //
-  // Two things shape these numbers. The plates straddle the rim rather
-  // than sitting inside it, so the extremes stay a few percent in from the
-  // edge — otherwise the left and right chairs hang over the rail and the
-  // action buttons. And the viewer's own plate is much wider than anyone
-  // else's, because it carries their two cards, so the chairs either side
-  // of the bottom are pushed well out towards the corners to clear it.
-  const LAYOUTS = {
-    2: [[50, 102], [50, 1]],
-    3: [[50, 102], [8, 24], [92, 24]],
-    4: [[50, 102], [5, 50], [50, 1], [95, 50]],
-    5: [[50, 102], [6, 76], [18, 4], [82, 4], [94, 76]],
-    6: [[50, 102], [7, 86], [5, 40], [50, 1], [95, 40], [93, 86]],
-    7: [[50, 102], [8, 90], [4, 48], [24, 3], [76, 3], [96, 48], [92, 90]],
+  // The felt is a rounded rectangle, so the chairs sit along four edges
+  // rather than on an ellipse. Landscape puts three along the top and
+  // three along the bottom with two at each end; portrait turns that a
+  // quarter and runs three down each side with two across the top. The
+  // extremes sit on the rim itself, because the plates straddle it.
+  const LAYOUTS_WIDE = {
+    2: [[50, 100], [50, 0]],
+    3: [[50, 100], [18, 0], [82, 0]],
+    4: [[50, 100], [0, 50], [50, 0], [100, 50]],
+    5: [[50, 100], [0, 62], [26, 0], [74, 0], [100, 62]],
+    6: [[50, 100], [20, 100], [14, 0], [50, 0], [86, 0], [80, 100]],
+    7: [[50, 100], [20, 100], [0, 50], [28, 0], [72, 0], [100, 50], [80, 100]],
     8: [
-      [50, 102], [8, 92], [4, 54], [18, 4],
-      [50, 1], [82, 4], [96, 54], [92, 92],
+      [50, 100], [20, 100], [0, 50], [22, 0],
+      [50, 0], [78, 0], [100, 50], [80, 100],
     ],
     9: [
-      [50, 102], [9, 93], [4, 62], [7, 26], [34, 1],
-      [66, 1], [93, 26], [96, 62], [91, 93],
+      [50, 100], [20, 100], [0, 66], [0, 30], [30, 0],
+      [70, 0], [100, 30], [100, 66], [80, 100],
     ],
     10: [
-      [50, 102], [9, 94], [4, 68], [5, 34], [21, 3],
-      [50, 1], [79, 3], [95, 34], [96, 68], [91, 94],
+      [50, 100], [20, 100], [0, 66], [0, 30], [22, 0],
+      [50, 0], [78, 0], [100, 30], [100, 66], [80, 100],
     ],
   };
+
+  // Portrait keeps its side chairs a little inside the rim: the felt is
+  // only a phone wide, so a plate centred on the edge would hang off the
+  // screen rather than overlap the felt the way it can in landscape.
+  const LAYOUTS_TALL = {
+    2: [[50, 100], [50, 0]],
+    3: [[50, 100], [13, 40], [87, 40]],
+    4: [[50, 100], [13, 55], [50, 0], [87, 55]],
+    5: [[50, 100], [13, 66], [13, 24], [87, 24], [87, 66]],
+    6: [[50, 100], [13, 70], [13, 34], [50, 0], [87, 34], [87, 70]],
+    7: [[50, 100], [13, 72], [13, 42], [26, 0], [74, 0], [87, 42], [87, 72]],
+    8: [
+      [50, 100], [13, 76], [13, 50], [13, 24],
+      [50, 0], [87, 24], [87, 50], [87, 76],
+    ],
+    9: [
+      [50, 100], [13, 78], [13, 52], [13, 26], [33, 0],
+      [67, 0], [87, 26], [87, 52], [87, 78],
+    ],
+    // Ten on a phone is the one count that will not fit three a side
+    // with two clean chairs across the bottom: the felt is barely wider
+    // than two plates. The tenth sits out at the bottom-right corner and
+    // a little above the rim, clear of both the hero and the buttons.
+    10: [
+      [50, 100], [13, 78], [13, 52], [13, 26], [33, 0],
+      [67, 0], [87, 26], [87, 52], [87, 78], [90, 94],
+    ],
+  };
+
 
   // A phone is portrait, so the felt is taller than it is wide and the
   // chairs run down the sides instead of along the top and bottom. The
@@ -258,20 +403,12 @@
   let places = $derived.by(() => {
     const anchor = mySeat ?? 0;
     const count = Math.max(2, Math.min(10, seatCount));
-    const layout = LAYOUTS[count];
+    const layout = (portrait ? LAYOUTS_TALL : LAYOUTS_WIDE)[count];
 
     return Array.from({ length: seatCount }, (_, number) => {
       const slot = (number - anchor + seatCount) % seatCount;
-      if (!portrait) {
-        const [x, y] = layout[slot % layout.length];
-        return { number, x, y };
-      }
-      const angle = Math.PI / 2 + (slot * 2 * Math.PI) / seatCount;
-      return {
-        number,
-        x: 50 + 36 * Math.cos(angle),
-        y: 52 + 45 * Math.sin(angle),
-      };
+      const [x, y] = layout[slot % layout.length];
+      return { number, x, y };
     });
   });
 
@@ -431,10 +568,17 @@
     <div class="table-area">
       <div class="felt" class:quiet-labels={!!view.rabbit}>
         <div class="pot-row">
+          <!-- The pot is what is already in the middle. While a round is
+               being bet there is more than that on the table, so the
+               larger figure sits above it; once the round is swept in the
+               two are the same and only the pot is shown. -->
+          {#if (hand?.total ?? 0) > (hand?.pot ?? 0)}
+            <div class="total numeric">Total {money(hand.total)}</div>
+          {/if}
           <div class="pot numeric">{money(hand?.pot ?? 0)}</div>
         </div>
 
-        <div class="boards">
+        <div class="boards" data-runs={boards.length}>
           {#each boards as board, index (index)}
             {#if board.length || (index === 0 && view.rabbit)}
               <div class="board">
@@ -447,7 +591,7 @@
                   <Rabbit
                     rabbit={view.rabbit}
                     fourColour={prefs.fourColour}
-                    onReveal={(i) => conn.send('rabbit', { index: i })}
+                    onRevealAll={() => conn.send('rabbit', {})}
                   />
                 {:else}
                   <!-- Placeholders for the cards still to come, so the board
@@ -465,9 +609,7 @@
                  which is exactly the wrong impression: these are cards the
                  hand never reached. -->
             <p class="rabbit-note">
-              {view.rabbit.cards.some((c) => c === null)
-                ? 'Cards that never came — tap one to see it'
-                : 'Cards that never came'}
+              Cards that never came
             </p>
           {/if}
         </div>
@@ -876,10 +1018,13 @@
     container-type: inline-size;
   }
 
+  /* A rounded rectangle rather than an oval: the chairs sit along four
+     straight edges, which reads as a real card table and leaves the
+     corners for the ends of each row instead of wasting them on a curve. */
   .felt {
     position: absolute;
     inset: 0;
-    border-radius: 50%;
+    border-radius: clamp(40px, 12cqw, 116px);
     background: radial-gradient(
       ellipse at 50% 34%,
       var(--felt-top),
@@ -895,11 +1040,23 @@
     gap: 10px;
   }
 
-  /* Clear of the top seats' chips, which sit just under their plates on
-     the felt and would otherwise land on top of the pot. */
+  /* In the flow above the boards rather than pinned to a percentage of
+     the felt: a hand run two or three times stacks that many boards, and
+     anything at a fixed height ends up behind them. */
   .pot-row {
-    position: absolute;
-    top: 22%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    margin-bottom: clamp(10px, 2cqw, 22px);
+  }
+
+  .total {
+    font-family: var(--numerals);
+    font-size: clamp(10px, 1.5cqw, 14px);
+    letter-spacing: 0.06em;
+    color: rgba(255, 255, 255, 0.6);
+    white-space: nowrap;
   }
 
   .pot {
@@ -934,6 +1091,22 @@
     letter-spacing: 0.1em;
     text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5);
+  }
+
+  /* Several boards share the felt when a hand is run more than once, so
+     the cards shrink to fit rather than spilling over the seats. */
+  .boards[data-runs='2'] :global(.card),
+  .boards[data-runs='2'] .slot {
+    --w: clamp(24px, 8cqw, 66px);
+    width: var(--w);
+  }
+
+  .boards[data-runs='3'] :global(.card),
+  .boards[data-runs='3'] .slot,
+  .boards[data-runs='4'] :global(.card),
+  .boards[data-runs='4'] .slot {
+    --w: clamp(20px, 6cqw, 50px);
+    width: var(--w);
   }
 
   .board :global(.card) {
@@ -1317,21 +1490,21 @@
     }
 
     .table-area {
-      width: 100%;
-      aspect-ratio: 1 / 1.12;
+      /* Taller on a phone: the long sides now carry three chairs each.
+         The height has to be capped as well, or a felt that tall pushes
+         the chairs hanging off its bottom edge down behind the action
+         buttons. The cap is written as a width because of the ratio. */
+      width: min(100%, (100dvh - 450px) / 1.38);
+      aspect-ratio: 1 / 1.38;
     }
 
     .felt {
+      border-radius: clamp(28px, 11cqw, 72px);
       box-shadow:
         0 0 0 8px var(--felt-rim),
         0 14px 36px rgba(0, 0, 0, 0.5);
     }
 
-    /* The ring of chairs reaches further up and down a portrait felt, so
-       the pot and the wordmarks move clear of it. */
-    .pot-row {
-      top: 30%;
-    }
 
     .felt-name {
       top: 78%;

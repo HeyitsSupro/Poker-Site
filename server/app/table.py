@@ -41,6 +41,10 @@ REACTIONS = ("👍", "😂", "😮", "😍", "😡", "🤔", "🎉", "💀")
 REACTION_SECONDS = 5
 MAX_REACTIONS = 12
 MAX_NOTE_LENGTH = 200
+# Roughly how long the client takes to deal one run out, card by card.
+# The pause between hands is extended by this much per run so nobody has
+# the next hand dealt on top of the one they are still watching.
+RUN_OUT_SECONDS_PER_RUN = 6
 
 # Seat states.
 PLAYING = "playing"      # in the current hand, or ready for the next
@@ -766,7 +770,7 @@ def set_auto_muck(player_id: str, on: bool):
     return mutate
 
 
-def reveal(player_id: str, index: int):
+def reveal(player_id: str, index: int | None):
     """Rabbit hunting: flip one of the cards the hand never got to (6.7).
 
     Only between hands, only when the host has it switched on, and the card
@@ -787,8 +791,22 @@ def reveal(player_id: str, index: int):
             raise Rejected("There is nothing left to see.")
 
         rabbit = last["rabbit"]
+        count = len(rabbit["cards"])
+
+        if index is None:
+            # Turn the lot over. Nobody wants to tap four cards one at a
+            # time to answer one question.
+            if len(rabbit["revealed"]) >= count:
+                raise Rejected("They are all face up already.")
+            rabbit["revealed"] = list(range(count))
+            note(state, "rabbit_all", player_id=player_id, nick=player["nick"],
+                 cards=list(rabbit["cards"]))
+            return state, [
+                Event("rabbit", {"cards": list(rabbit["cards"])}, player_id)
+            ]
+
         position = int(index)
-        if not 0 <= position < len(rabbit["cards"]):
+        if not 0 <= position < count:
             raise Rejected("That card is not there.")
         if position in rabbit["revealed"]:
             raise Rejected("That one is already face up.")
@@ -915,9 +933,15 @@ def _settle_table(
             # chips are swept and the next hand is dealt.
             if _open_showdown_choice(state, hand, now):
                 break
+            runs = max(1, len(hand.run_boards) or 1)
             events += _finish_hand(state, hand)
             state["hand"] = None
             gap = int(state["settings"].get("between_hands_seconds", 0))
+            # Running it more than once is dealt out one board at a time
+            # on screen, which takes real seconds. Hold the gap open long
+            # enough to watch it, or the next hand lands mid-run-out.
+            if gap > 0 and runs > 1:
+                gap += RUN_OUT_SECONDS_PER_RUN * runs
             state["between_hands_until"] = now + gap if gap > 0 else None
             continue
 
@@ -1369,6 +1393,19 @@ def _finish_hand(state: State, hand: holdem.Hand) -> list[Event]:
         "result": result,
         "button": hand.button,
         "rabbit": _rabbit_cards(state, hand),
+        # Who held what. Face-down hands are in here as well, so this key
+        # never travels: `_last_hand_view` drops it, and the only thing
+        # built from it is the per-viewer `seats` in the finished-hand
+        # view, which applies the same rule a live hand does.
+        "hole": {
+            str(number): {
+                "player_id": seat.player_id,
+                "cards": list(seat.hole),
+                "revealed": bool(seat.revealed),
+                "folded": bool(seat.folded),
+            }
+            for number, seat in hand.seats.items()
+        },
     }
 
     note(state, "hand_complete", hand_no=hand.hand_no, awards=result.get("awards"))
@@ -1432,6 +1469,13 @@ def _rabbit_cards(state: State, hand: holdem.Hand) -> dict[str, Any] | None:
     if not state["settings"].get("rabbit_hunting", False):
         return None
     if len(hand.board) >= 5:
+        return None
+    # A hand that was run out reached the river on every run, whatever
+    # `board` says: `board` holds only the part the runs share, and the
+    # rest of each one is in `run_boards`. Nothing was left undealt, so
+    # there is nothing to hunt — and the deck below has already been
+    # spent on those runs, so it would not be the truth anyway.
+    if hand.run_boards:
         return None
 
     # Deal them the way the hand itself would have: a burn before each
@@ -1733,7 +1777,8 @@ def _last_hand_view(state: State) -> dict[str, Any] | None:
     last = state.get("last_hand")
     if last is None:
         return None
-    return {key: value for key, value in last.items() if key != "rabbit"}
+    hidden = {"rabbit", "hole"}
+    return {key: value for key, value in last.items() if key not in hidden}
 
 
 def _showdown_view(state: State, player_id: str | None) -> dict[str, Any] | None:
@@ -1780,7 +1825,7 @@ def view_for(state: State, player_id: str | None, now: float | None = None) -> d
     at = time.time() if now is None else now
     hand = _load_hand(state)
     if hand is None and state.get("last_hand"):
-        hand_view = _finished_hand_view(state)
+        hand_view = _finished_hand_view(state, player_id)
     else:
         hand_view = _live_hand_view(state, hand, player_id)
 
@@ -1910,7 +1955,12 @@ def _live_hand_view(
         "street": hand.street,
         "board": list(hand.board),
         "boards": [list(hand.board)],
-        "pot": hand.pot_total,
+        # Two numbers, because they mean different things to a player:
+        # `pot` is what is already in the middle, `total` is what it will
+        # be if the current round is called. They are equal between
+        # rounds, and the client shows the second only when it differs.
+        "pot": hand.settled_pot,
+        "total": hand.pot_total,
         "current_bet": hand.current_bet,
         "to_act": hand.to_act,
         "button": hand.button,
@@ -1918,14 +1968,36 @@ def _live_hand_view(
     }
 
 
-def _finished_hand_view(state: State) -> dict[str, Any]:
+def _finished_hand_view(state: State, player_id: str | None = None) -> dict[str, Any]:
+    """The hand that just ended, as this viewer may see it.
+
+    A showdown is worth looking at, and the pause after the hand is when
+    people look — so the hands that were turned over stay on the felt
+    until the next one is dealt. The disclosure rule is the live one: your
+    own cards, plus anyone who showed. A hand that was mucked stays down.
+    """
     last = state["last_hand"]
+    seats = []
+    for number, row in sorted((last.get("hole") or {}).items(), key=lambda kv: int(kv[0])):
+        mine = player_id is not None and row.get("player_id") == player_id
+        visible = mine or row.get("revealed")
+        cards = list(row.get("cards") or [])
+        seats.append(
+            {
+                "seat": int(number),
+                "cards": cards if visible and cards else None,
+                "card_count": len(cards) if row.get("revealed") else 0,
+                "folded": bool(row.get("folded")),
+            }
+        )
     return {
+        "seats": seats,
         "hand_no": last["hand_no"],
         "street": holdem.COMPLETE,
         "board": last["boards"][0] if last["boards"] else [],
         "boards": last["boards"],
         "pot": last["result"].get("pot", 0),
+        "total": last["result"].get("pot", 0),
         "to_act": None,
         "button": last["button"],
         "complete": True,

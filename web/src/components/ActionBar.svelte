@@ -131,8 +131,9 @@
   {:else}
     <!-- The pre-action row. It is always present, so arming something
          never changes the height of this column and never nudges the
-         table. CALL only appears when there is a bet to call, and it sits
-         to the left of CHECK OR FOLD. -->
+         table. It shares the grid of the row below: CALL takes the first
+         column, on its own at the left, and CHECK OR FOLD spans the other
+         three, starting where CHECK starts so the two never overlap. -->
     <div class="pre" class:hidden={myTurn}>
       <div class="pre-slot">
         {#if facing > 0}
@@ -147,7 +148,7 @@
         {/if}
       </div>
       <button
-        class="pre-btn half"
+        class="pre-btn wide"
         class:armed={preAction?.kind === 'check_fold'}
         aria-pressed={preAction?.kind === 'check_fold'}
         onclick={() => onPreAction('check_fold')}
@@ -215,11 +216,18 @@
 
   .pre {
     display: grid;
-    /* CALL on the left, CHECK OR FOLD at half width on the right. The
-       left slot is held open even when there is nothing to call. */
-    grid-template-columns: 1fr 1fr;
+    /* The same four columns as the row below, so the pre-actions line up
+       with the buttons they stand in for. CALL sits alone in the first
+       column; the left slot is held open even when there is nothing to
+       call, so CHECK OR FOLD never slides underneath it. */
+    grid-template-columns: 1.15fr 1fr 1fr 1fr;
     gap: 8px;
     height: 40px;
+  }
+
+  /* From the CHECK column to the right-hand edge. */
+  .pre-btn.wide {
+    grid-column: 2 / -1;
   }
 
   /* Hidden rather than removed, so the row below never moves up. */

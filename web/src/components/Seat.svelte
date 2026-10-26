@@ -197,15 +197,10 @@
     display: flex;
     /* Raised so the cards break the top edge of the plate, the way they do
        on a real table, without covering anything. */
-    margin-top: -26px;
-    margin-bottom: -4px;
-    z-index: 1;
-    flex: none;
-  }
-
-  .cards.mine {
     margin-top: -36px;
     margin-bottom: -8px;
+    z-index: 1;
+    flex: none;
   }
 
   .cards > :global(*:nth-child(2)) {
@@ -499,14 +494,21 @@
     font-weight: 700;
   }
 
+  /* An empty chair is exactly the footprint of an occupied one, so the
+     ring does not jump about as people sit down and stand up — same
+     width, same height, same corner radius, just dashed and dimmed. */
   .sit {
-    min-height: 38px;
-    padding: 0 20px;
-    font-size: 13px;
+    min-width: 148px;
+    min-height: 68px;
+    padding: 9px 18px;
+    border-radius: var(--radius);
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
     /* Reads as an empty chair in either theme: the plate colour, dimmed,
        with a dashed edge. */
     background: color-mix(in srgb, var(--plate) 70%, transparent);
-    border-style: dashed;
+    border: 2px dashed var(--plate-edge);
     color: var(--text-dim);
   }
 
@@ -534,6 +536,13 @@
 
     .stack {
       font-size: 15px;
+    }
+
+    .sit {
+      min-width: 84px;
+      min-height: 48px;
+      padding: 5px 10px;
+      font-size: 13px;
     }
   }
 </style>

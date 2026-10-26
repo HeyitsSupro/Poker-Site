@@ -127,6 +127,16 @@
     display: flex;
     gap: 6px;
     align-items: baseline;
+    /* A long message wraps instead of running off to the right and
+       pushing everything else out of the panel. */
+    flex-wrap: wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  li span {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   li span {

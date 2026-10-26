@@ -193,7 +193,19 @@ class Hand:
 
     @property
     def pot_total(self) -> int:
+        """Every chip committed to this hand, including the live round."""
         return sum(seat.total for seat in self.seats.values())
+
+    @property
+    def settled_pot(self) -> int:
+        """The pot as it stood before the round in progress.
+
+        What players have pushed out on the current street is not in here:
+        it is still in front of them, and is only swept in when the round
+        closes. Antes are, because they are dead money from the moment
+        they are posted — the engine zeroes them out of `committed`.
+        """
+        return sum(seat.total - seat.committed for seat in self.seats.values())
 
     def chips_on_table(self) -> int:
         """Every chip in the game, wherever it currently sits.

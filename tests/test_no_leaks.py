@@ -230,3 +230,39 @@ def test_a_spectator_receives_nothing_private(client):
         watcher.receive_json(), watcher.receive_json()
         watcher.send_json({"t": "action", "aid": "x", "kind": "say", "data": {}})
         assert watcher.receive_json()["code"] == "spectator"
+
+
+def test_a_finished_hand_keeps_mucked_cards_down():
+    """The pause after a hand shows the showdown, not everybody's cards.
+
+    `last_hand` holds every seat's hole cards so the hands that were turned
+    over can stay on the felt until the next deal. That store must never
+    travel: a viewer gets their own cards and the ones that were shown, and
+    a spectator gets neither.
+    """
+    state, ids = seated_table(2)
+    hand = holdem.Hand.from_dict(state["hand"])
+
+    # Fold the hand out so it ends with nobody showing anything.
+    folder = next(
+        player for player in ids if T.seat_of(state, player) == hand.to_act
+    )
+    state, _ = T.act(folder, "fold", None)(state)
+    assert state.get("last_hand"), "the hand finished"
+    assert state["last_hand"].get("hole"), "and its cards were kept"
+
+    by_seat = {seat.seat: list(seat.hole) for seat in hand.seats.values()}
+
+    for viewer in ids:
+        text = dump(T.view_for(state, viewer))
+        seat_number = T.seat_of(state, viewer)
+        mine = by_seat[seat_number]
+        theirs = [
+            card for seat, cards in by_seat.items() if seat != seat_number
+            for card in cards
+        ]
+        assert cards_in(text, mine) == mine, "you still see your own hand"
+        assert cards_in(text, theirs) == [], "a hand nobody showed stays down"
+
+    everyones = [card for cards in by_seat.values() for card in cards]
+    assert cards_in(dump(T.view_for(state, None)), everyones) == []

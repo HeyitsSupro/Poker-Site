@@ -83,11 +83,10 @@
   .board {
     --w: clamp(52px, 8vw, 96px);
   }
-  /* Other players' cards are a hint that there is a hand there, not the
-     focus: small enough to sit on the plate without crowding its neighbour. */
-  .hole {
-    --w: clamp(30px, 3.4vw, 44px);
-  }
+  /* Every player's cards are drawn at one size, your own included: a
+     shown-down hand should be as readable across the table as it is in
+     front of you. */
+  .hole,
   .mine {
     --w: clamp(42px, 4.6vw, 60px);
   }

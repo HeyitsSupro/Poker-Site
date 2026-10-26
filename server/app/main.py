@@ -581,7 +581,9 @@ def _mutate_for(conn: Connection, kind: str, data: dict, state: dict, aid: str):
     if kind == "auto_muck":
         return table_model.set_auto_muck(pid, bool(data.get("on", True)))
     if kind == "rabbit":
-        return table_model.reveal(pid, int(data.get("index", 0)))
+        # No index means "turn them all over".
+        index = data.get("index")
+        return table_model.reveal(pid, None if index is None else int(index))
     if kind == "react":
         return table_model.react(pid, str(data.get("emoji", "")))
     if kind == "waitlist":

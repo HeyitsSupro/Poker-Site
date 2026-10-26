@@ -1,54 +1,77 @@
 <script>
   /**
    * Rabbit hunting (section 6.7): the cards the hand never reached, face
-   * down in the board positions they would have filled. Anyone at the
-   * table can turn one over, and it turns over for everybody. No vote, no
-   * cost.
+   * down in the board positions they would have filled.
    *
-   * This renders inside the board row, so the cards line up with the ones
-   * that were actually dealt.
+   * One strip across the lot rather than a card at a time — the question
+   * is always "what would have come", never "what would the turn have
+   * been, specifically". Turning them over shows them to everybody.
    */
   import Card from './Card.svelte';
 
-  let { rabbit, fourColour = false, onReveal } = $props();
+  let { rabbit, fourColour = false, onRevealAll } = $props();
+
+  let hidden = $derived(rabbit.cards.filter((c) => c === null).length);
 </script>
 
-{#each rabbit.cards as card, index (index)}
-  {#if card}
-    <div class="revealed" title="rabbit hunted">
-      <Card {card} size="board" {fourColour} />
-    </div>
-  {:else}
-    <button
-      class="hidden-card"
-      onclick={() => onReveal(index)}
-      aria-label="Turn over the card that would have come"
-      title="See what would have come"
-    >
-      <Card card={null} size="board" />
-    </button>
+<div class="rabbit">
+  {#each rabbit.cards as card, index (index)}
+    {#if card}
+      <div class="revealed" title="rabbit hunted">
+        <Card {card} size="board" {fourColour} />
+      </div>
+    {:else}
+      <div class="face-down">
+        <Card card={null} size="board" />
+      </div>
+    {/if}
+  {/each}
+
+  {#if hidden > 0}
+    <button class="strip" onclick={onRevealAll}>Show cards</button>
   {/if}
-{/each}
+</div>
 
 <style>
-  .hidden-card {
-    display: block;
-    padding: 0;
-    border: none;
-    background: none;
-    /* The card sets the size and is already far larger than a 44px
-       target, so the global minimum button height is not wanted here. */
-    min-height: 0;
-    line-height: 0;
-    border-radius: 8px;
-    opacity: 0.6;
-    transition: opacity 140ms ease, transform 140ms ease;
+  /* The undealt cards are one group inside the board row, so the strip
+     has something to span. `gap: inherit` keeps them spaced exactly like
+     the cards that were really dealt. */
+  .rabbit {
+    position: relative;
+    display: flex;
+    gap: inherit;
   }
 
-  .hidden-card:hover,
-  .hidden-card:focus-visible {
-    opacity: 1;
-    transform: translateY(-4px);
+  /* One translucent bar across the lot. Black on white so it reads over
+     a card back at any felt colour. */
+  .strip {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 0;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.78);
+    color: #16141a;
+    font-size: clamp(10px, 1.3cqw, 14px);
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    backdrop-filter: blur(1px);
+    transition: background 120ms ease;
+  }
+
+  .strip:hover,
+  .strip:focus-visible {
+    background: rgba(255, 255, 255, 0.92);
+  }
+
+  .face-down {
+    line-height: 0;
+    opacity: 0.55;
   }
 
   /* A card that was never really dealt: shown, but visibly set apart from
